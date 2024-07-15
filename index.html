@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TheDevUniverse</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Courier New', monospace;
+        }
+        #matrix-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        #toggle-terminal {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+            padding: 10px 20px;
+            background-color: #0F0;
+            color: #000;
+            border: none;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+        #terminal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 600px;
+            height: 400px;
+            background-color: rgba(0, 0, 0, 0.9);
+            border: 1px solid #0F0;
+            z-index: 1000;
+            resize: both;
+            overflow: hidden;
+            flex-direction: column;
+        }
+        #terminal-header {
+            background-color: #0F0;
+            color: #000;
+            padding: 5px;
+            cursor: move;
+            display: flex;
+            justify-content: space-between;
+        }
+        #terminal-content {
+            flex-grow: 1;
+            padding: 10px;
+            color: #0F0;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            outline: none;
+            caret-color: transparent;
+        }
+        #close-terminal, #fullscreen-terminal {
+            background: none;
+            border: none;
+            color: #000;
+            cursor: pointer;
+        }
+        #cursor {
+            display: inline-block;
+            width: 8px;
+            height: 15px;
+            background-color: #0F0;
+            position: absolute;
+            z-index: 1001;
+        }
+        @keyframes blink {
+            0% { opacity: 0; }
+            50% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        #cursor.blink {
+            animation: blink 0.7s infinite;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="matrix-canvas"></canvas>
+    <button id="toggle-terminal">Open Terminal</button>
+    <div id="terminal">
+        <div id="terminal-header">
+            <span>Terminal</span>
+            <div>
+                <button id="fullscreen-terminal">[]</button>
+                <button id="close-terminal">X</button>
+            </div>
+        </div>
+        <div id="terminal-content" contenteditable="true" spellcheck="false"></div>
+        <div id="cursor" class="blink"></div>
+    </div>
+    <script>
+        // Matrix-style falling text
+        const canvas = document.getElementById('matrix-canvas');
+        const ctx = canvas.getContext('2d');
+
+        let fontSize = 20;
+        let columns;
+        let drops;
+        let matrixColor = '#0F0'; // Default green color
+
+        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%^&*()_+-=[]{}|;:,.<>?';
+
+        function setupMatrix() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            columns = Math.floor(canvas.width / fontSize);
+            drops = Array(columns).fill(1);
+        }
+
+        function drawMatrix() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = matrixColor;
+            ctx.font = `${fontSize}px monospace`;
+
+            for (let i = 0; i < drops.length; i++) {
+                const text = characters[Math.floor(Math.random() * characters.length)];
+                ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+
+                if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+                    drops[i] = 0;
+                }
+                drops[i]++;
+            }
+        }
+
+        function animateMatrix() {
+            drawMatrix();
+            requestAnimationFrame(animateMatrix);
+        }
+
+        setupMatrix();
+        animateMatrix();
+
+        // Terminal functionality
+        const toggleTerminalBtn = document.getElementById('toggle-terminal');
+        const terminal = document.getElementById('terminal');
+        const closeTerminalBtn = document.getElementById('close-terminal');
+        const fullscreenTerminalBtn = document.getElementById('fullscreen-terminal');
+        const terminalHeader = document.getElementById('terminal-header');
+        const terminalContent = document.getElementById('terminal-content');
+        const cursor = document.getElementById('cursor');
+
+        let commandHistory = [];
+        let historyIndex = -1;
+
+        function toggleTerminal() {
+            if (terminal.style.display === 'none' || terminal.style.display === '') {
+                openTerminal();
+            } else {
+                closeTerminal();
+            }
+        }
+
+        function openTerminal() {
+            terminal.style.display = 'flex';
+            toggleTerminalBtn.textContent = 'Close Terminal';
+            terminalContent.focus();
+            setCaretToEnd();
+            updateCursorPosition();
+        }
+
+        function closeTerminal() {
+            terminal.style.display = 'none';
+            toggleTerminalBtn.textContent = 'Open Terminal';
+        }
+
+        toggleTerminalBtn.addEventListener('click', toggleTerminal);
+        closeTerminalBtn.addEventListener('click', closeTerminal);
+
+        fullscreenTerminalBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                terminal.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        });
+
+        terminalContent.addEventListener('keydown', handleKeyDown);
+        terminalContent.addEventListener('input', handleInput);
+
+        function handleKeyDown(e) {
+            const lines = terminalContent.innerText.split('\n');
+            const currentLineIndex = lines.length - 1;
+            const currentLine = lines[currentLineIndex];
+
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const command = currentLine.substring(2).trim();
+                if (command) {
+                    commandHistory.push(command);
+                    historyIndex = commandHistory.length;
+                    executeCommand(command);
+                } else {
+                    appendNewLine();
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    replaceCurrentLine(commandHistory[historyIndex]);
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (historyIndex < commandHistory.length - 1) {
+                    historyIndex++;
+                    replaceCurrentLine(commandHistory[historyIndex]);
+                } else {
+                    historyIndex = commandHistory.length;
+                    replaceCurrentLine('');
+                }
+            } else if (e.key === 'Backspace') {
+                const selection = window.getSelection();
+                if (currentLine.length <= 2 || selection.anchorOffset <= 2) {
+                    e.preventDefault();
+                }
+            } else if (e.key === 'ArrowLeft' || e.key === 'Home') {
+                const selection = window.getSelection();
+                if (selection.anchorOffset <= 2) {
+                    e.preventDefault();
+                }
+            }
+            setTimeout(updateCursorPosition, 0);
+        }
+
+        function handleInput(e) {
+            const selection = window.getSelection();
+            const range = selection.getRangeAt(0);
+            
+            if (range.startContainer === terminalContent) {
+                const textNode = document.createTextNode('$ ');
+                terminalContent.appendChild(textNode);
+                range.setStart(textNode, 2);
+                range.setEnd(textNode, 2);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            } else if (range.startOffset < 2) {
+                range.setStart(range.startContainer, 2);
+                range.setEnd(range.startContainer, 2);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+            updateCursorPosition();
+        }
+
+        function replaceCurrentLine(text) {
+            const lines = terminalContent.innerText.split('\n');
+            lines[lines.length - 1] = `$ ${text}`;
+            terminalContent.innerText = lines.join('\n');
+            setCaretToEnd();
+        }
+
+        function appendNewLine() {
+            terminalContent.innerText += '\n$ ';
+            setCaretToEnd();
+        }
+
+        function setCaretToEnd() {
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.selectNodeContents(terminalContent);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            terminalContent.scrollTop = terminalContent.scrollHeight;
+            updateCursorPosition();
+        }
+
+        function updateCursorPosition() {
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                const rect = range.getBoundingClientRect();
+                const terminalRect = terminal.getBoundingClientRect();
+                
+                cursor.style.left = `${rect.right - terminalRect.left}px`;
+                cursor.style.top = `${rect.top - terminalRect.top}px`;
+            }
+        }
+
+        function executeCommand(command) {
+            const args = command.split(' ');
+            const cmd = args[0].toLowerCase();
+            let output = '';
+
+            // Project details storage
+            const projects = {
+                talkomatic: {
+                    name: "Talkomatic",
+                    description: "A real-time chat application that allows users to create and join chat rooms.",
+                    technologies: ["Node.js", "Express.js", "Socket.io", "Supabase"],
+                    features: [
+                        "Real-time messaging",
+                        "User authentication",
+                        "Create and join chat rooms",
+                        "Persistent data storage"
+                    ],
+                    website: "https://talkomatic.co"
+                },
+                talkomegle: {
+                    name: "Talkomegle",
+                    description: "An anonymous chat platform that pairs random users for one-on-one conversations.",
+                    technologies: ["Node.js", "Express.js", "Socket.io", "Supabase"],
+                    features: [
+                        "Random user pairing",
+                        "Real-time chat",
+                        "Anonymous communication",
+                        "User reporting system"
+                    ],
+                    website: "https://talkomegle.com"
+                },
+                talkogames: {
+                    name: "Talkogames",
+                    description: "A multiplayer game platform with integrated chat features.",
+                    technologies: ["HTML", "Tailwind CSS", "JavaScript"],
+                    features: [
+                        "Multiple game options",
+                        "In-game chat",
+                        "Responsive design",
+                        "Cross-browser compatibility"
+                    ],
+                    website: "https://talkogames.com"
+                }
+            };
+
+            switch (cmd) {
+                case 'help':
+                    output = `Available commands:
+help                   - Show this help message
+clear                  - Clear the terminal screen
+echo [text]            - Display the given text
+date                   - Display the current date and time
+random [min] [max]     - Generate a random number (default: 0-1)
+whoami                 - Display user information
+calc [expression]      - Calculate a mathematical expression
+color [color]          - Change the terminal text color
+bgcolor [color]        - Change the terminal background color
+matrixcolor [color]    - Change the color of the matrix background
+timer [seconds]        - Set a countdown timer
+todo                   - Manage a todo list (add, list, remove)
+weather [city]         - Get current weather (simulated)
+ascii [text]           - Generate ASCII art from text
+reverse [text]         - Reverse the given text
+base64 [encode/decode] [text] - Encode or decode text to/from Base64
+coin                   - Flip a coin
+dice [sides]           - Roll a dice (default: 6 sides)
+quote                  - Display a random quote
+history                - Show command history
+ls [name]              - List information categories for a person
+info [category/project] - Display detailed information
+exit                   - Close the terminal`;
+                    break;
+                case 'clear':
+                    terminalContent.innerText = '';
+                    appendNewLine();
+                    return;
+                case 'echo':
+                    output = args.slice(1).join(' ');
+                    break;
+                case 'date':
+                    output = new Date().toString();
+                    break;
+                case 'random':
+                    const min = args[1] ? parseFloat(args[1]) : 0;
+                    const max = args[2] ? parseFloat(args[2]) : 1;
+                    output = (Math.random() * (max - min) + min).toFixed(2);
+                    break;
+                case 'whoami':
+                    output = 'You are a curious explorer in the world of code.';
+                    break;
+                case 'calc':
+                    try {
+                        output = eval(args.slice(1).join(' '));
+                    } catch (e) {
+                        output = 'Invalid expression';
+                    }
+                    break;
+                case 'color':
+                    if (args[1]) {
+                        terminalContent.style.color = args[1];
+                        output = `Text color changed to ${args[1]}`;
+                    } else {
+                        output = 'Please specify a color';
+                    }
+                    break;
+                case 'bgcolor':
+                    if (args[1]) {
+                        terminal.style.backgroundColor = args[1];
+                        output = `Background color changed to ${args[1]}`;
+                    } else {
+                        output = 'Please specify a color';
+                    }
+                    break;
+                case 'matrixcolor':
+                    if (args[1]) {
+                        matrixColor = args[1];
+                        output = `Matrix color changed to ${args[1]}`;
+                    } else {
+                        output = 'Please specify a color. Usage: matrixcolor [color]';
+                    }
+                    break;
+                case 'timer':
+                    const seconds = parseInt(args[1]) || 10;
+                    output = `Timer set for ${seconds} seconds`;
+                    setTimeout(() => {
+                        alert('Timer finished!');
+                    }, seconds * 1000);
+                    break;
+                    case 'todo':
+                    if (!window.todoList) window.todoList = [];
+                    if (args[1] === 'add' && args[2]) {
+                        window.todoList.push(args.slice(2).join(' '));
+                        output = 'Todo item added';
+                    } else if (args[1] === 'list') {
+                        output = window.todoList.map((item, i) => `${i + 1}. ${item}`).join('\n') || 'No items in todo list';
+                    } else if (args[1] === 'remove' && args[2]) {
+                        const index = parseInt(args[2]) - 1;
+                        if (window.todoList[index]) {
+                            window.todoList.splice(index, 1);
+                            output = 'Todo item removed';
+                        } else {
+                            output = 'Invalid item index';
+                        }
+                    } else {
+                        output = 'Usage: todo [add|list|remove] [item]';
+                    }
+                    break;
+                case 'weather':
+                    const cities = {
+                        'new york': 'Partly cloudy, 72°F',
+                        'london': 'Rainy, 60°F',
+                        'tokyo': 'Sunny, 80°F',
+                        'sydney': 'Clear, 70°F'
+                    };
+                    const city = args[1]?.toLowerCase() || 'new york';
+                    output = cities[city] || 'City not found. Try: new york, london, tokyo, sydney';
+                    break;
+                case 'ascii':
+                    const text = args.slice(1).join(' ') || 'Hello';
+                    output = `
+ _____
+< ${text} >
+ -----
+        \\   ^__^
+         \\  (oo)\\_______
+            (__)\\       )\\/\\
+                ||----w |
+                ||     ||
+    `;
+                    break;
+                case 'reverse':
+                    output = args.slice(1).join(' ').split('').reverse().join('');
+                    break;
+                case 'base64':
+                    if (args[1] === 'encode' && args[2]) {
+                        output = btoa(args.slice(2).join(' '));
+                    } else if (args[1] === 'decode' && args[2]) {
+                        try {
+                            output = atob(args[2]);
+                        } catch (e) {
+                            output = 'Invalid Base64 string';
+                        }
+                    } else {
+                        output = 'Usage: base64 [encode|decode] [text]';
+                    }
+                    break;
+                case 'coin':
+                    output = Math.random() < 0.5 ? 'Heads' : 'Tails';
+                    break;
+                case 'dice':
+                    const sides = parseInt(args[1]) || 6;
+                    output = `You rolled a ${Math.floor(Math.random() * sides) + 1}`;
+                    break;
+                case 'quote':
+                    const quotes = [
+                        "The only way to do great work is to love what you do. - Steve Jobs",
+                        "Innovation distinguishes between a leader and a follower. - Steve Jobs",
+                        "The future belongs to those who believe in the beauty of their dreams. - Eleanor Roosevelt",
+                        "Code is like humor. When you have to explain it, it's bad. - Cory House"
+                    ];
+                    output = quotes[Math.floor(Math.random() * quotes.length)];
+                    break;
+                case 'history':
+                    output = commandHistory.join('\n');
+                    break;
+                case 'ls':
+                    if (args[1] === 'mohd') {
+                        output = `Information about Mohd:
+1. Projects
+2. Skills
+3. Contact
+4. About
+
+Type 'info [category]' to view details. For example: 'info projects' for Projects.`;
+                    } else if (args[1] === 'jaxon') {
+                        output = `There is no available information for Jaxon.`;
+                    } else {
+                        output = `Usage: ls [name]\nAvailable names: mohd`;
+                    }
+                    break;
+                case 'info':
+                    if (args[1] === 'projects') {
+                        output = `Mohd's Projects:
+1. Talkomatic (talkomatic.co)
+2. Talkomegle (talkomegle.com)
+3. Talkogames (talkogames.com)
+
+Type 'info [project_name]' for more details about a specific project.`;
+                    } else if (args[1] === 'skills') {
+                        output = `Mohd's Skills:
+- HTML
+- CSS
+- Tailwind CSS
+- JavaScript
+- Socket.io
+- PHP
+- C++
+- Python
+- Node.js
+- Express.js
+- Supabase`;
+                    } else if (args[1] === 'contact') {
+                        output = `Contact Mohd:
+Email: contact@mohdmahmodi.com
+Website: https://mohdmahmodi.com
+GitHub: https://github.com/mohdyahyamahmodi`;
+                    } else if (args[1] === 'about') {
+                        output = `About Mohd:
+Mohd is a 19-year-old computer science student living in California. He is passionate about web development and is currently studying machine learning and deep learning. Despite his young age, Mohd has already developed several impressive projects, showcasing his skills in full-stack web development.`;
+                    } else if (projects[args[1]]) {
+                        const project = projects[args[1]];
+                        output = `Project: ${project.name}
+
+Description: ${project.description}
+
+Technologies used:
+${project.technologies.map(tech => `- ${tech}`).join('\n')}
+
+Key Features:
+${project.features.map(feature => `- ${feature}`).join('\n')}
+
+Would you like to visit the ${project.name} website? (Type 'yes' or 'no')`;
+                        window.awaitingWebsiteResponse = project.website;
+                    } else {
+                        output = `Invalid category or project. Type 'ls mohd' or 'info projects' to see available options.`;
+                    }
+                    break;
+                case 'yes':
+                    if (window.awaitingWebsiteResponse) {
+                        output = `Opening ${window.awaitingWebsiteResponse} in a new tab.`;
+                        window.open(window.awaitingWebsiteResponse, '_blank');
+                        window.awaitingWebsiteResponse = null;
+                    } else {
+                        output = `There's no pending website to open. Type 'info [project_name]' to get project details first.`;
+                    }
+                    break;
+                case 'no':
+                    if (window.awaitingWebsiteResponse) {
+                        output = `Okay, not opening the website. What else would you like to know?`;
+                        window.awaitingWebsiteResponse = null;
+                    } else {
+                        output = `There's no pending website to decline. Type 'info [project_name]' to get project details first.`;
+                    }
+                    break;
+                case 'exit':
+                    closeTerminal();
+                    return;
+                default:
+                    output = `Command not found: ${cmd}. Type 'help' for available commands.`;
+            }
+
+            if (output) {
+                terminalContent.innerText += `\n${output}`;
+            }
+            appendNewLine();
+        }
+
+        // Make the terminal draggable
+        let isDragging = false;
+        let currentX;
+        let currentY;
+        let initialX;
+        let initialY;
+        let xOffset = 0;
+        let yOffset = 0;
+
+        terminalHeader.addEventListener('mousedown', dragStart);
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', dragEnd);
+
+        function dragStart(e) {
+            initialX = e.clientX - xOffset;
+            initialY = e.clientY - yOffset;
+
+            if (e.target === terminalHeader) {
+                isDragging = true;
+            }
+        }
+
+        function drag(e) {
+            if (isDragging) {
+                e.preventDefault();
+                currentX = e.clientX - initialX;
+                currentY = e.clientY - initialY;
+
+                xOffset = currentX;
+                yOffset = currentY;
+
+                setTranslate(currentX, currentY, terminal);
+            }
+        }
+
+        function dragEnd(e) {
+            initialX = currentX;
+            initialY = currentY;
+
+            isDragging = false;
+        }
+
+        function setTranslate(xPos, yPos, el) {
+            el.style.transform = `translate3d(${xPos}px, ${yPos}px, 0)`;
+        }
+
+        window.addEventListener('resize', () => {
+            setupMatrix();
+        });
+
+        // Initial terminal prompt
+        terminalContent.innerText = 'Welcome to TheDevUniverse terminal. Type "help" for available commands.\n$ ';
+        setCaretToEnd();
+    </script>
+</body>
+</html>
